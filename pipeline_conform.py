@@ -677,6 +677,21 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
         return attention_maps # consolidated attention mapss
 
+    def _aggregate_attention_with_boxes(self, attention_maps: torch.Tensor, bounding_boxes: Dict[int, List[float]], img_size: Tuple[int, int]) -> torch.Tensor:
+        """
+        Apply bounding box masks to the attention maps.
+        """
+        masked_maps = attention_maps.clone()
+        for token_idx, bbox in bounding_boxes.items():
+            x_min, y_min, x_max, y_max = [
+                int(coord * size) for coord, size in zip(bbox, img_size)
+            ]
+            mask = torch.zeros_like(masked_maps[:, :, token_idx])
+            mask[y_min:y_max, x_min:x_max] = 1
+            masked_maps[:, :, token_idx] *= mask  # Apply the mask
+        return masked_maps
+
+
     @staticmethod
     def _compute_contrastive_loss( # compute loss based on att maps of model
         attention_maps: torch.Tensor,
@@ -802,6 +817,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         text_embeddings: torch.Tensor,
         step_size: float,
         t: int, # timestep in diffusion process
+        bounding_boxes: Optional[Dict[int, List[float]]] = None,  # bounding_boxes
         refinement_steps: int = 20,
         do_smoothing: bool = True,
         smoothing_kernel_size: int = 3,
@@ -823,8 +839,20 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             self.unet(latents, t, encoder_hidden_states=text_embeddings).sample # pass latents through unet
             self.unet.zero_grad()
 
-            # Get max activation value for each subject token
-            attention_maps = self._aggregate_attention() # current att maps
+            # # Get max activation value for each subject token
+            # attention_maps = self._aggregate_attention() # current att maps
+
+
+            # Aggregate attention maps with optional bounding box masking
+            if bounding_boxes:
+                attention_maps = self._aggregate_attention_with_boxes(
+                    self._aggregate_attention(["up", "mid", "down"]),
+                    bounding_boxes,
+                    img_size=(16, 16),
+                )
+            else:
+                attention_maps = self._aggregate_attention(["up", "mid", "down"])
+
 
             loss = self._compute_contrastive_loss( # previously defined
                 attention_maps=attention_maps,
@@ -1085,6 +1113,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                                 text_embeddings=text_embedding,
                                 step_size=step_size[i],
                                 t=t,
+                                bounding_boxes = bounding_boxes,
                                 refinement_steps=refinement_steps,
                                 do_smoothing=do_smoothing,
                                 smoothing_kernel_size=smoothing_kernel_size,
