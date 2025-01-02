@@ -684,7 +684,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         masked_maps = attention_maps.clone()
         for token_idx, bbox in bounding_boxes.items():
             x_min, y_min, x_max, y_max = [
-                int(coord * size) for coord, size in zip(bbox, img_size)
+                int(coord * size) for coord, size in zip(bbox, img_size*2)
             ]
             mask = torch.zeros_like(masked_maps[:, :, token_idx])
             mask[y_min:y_max, x_min:x_max] = 1
@@ -846,12 +846,12 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             # Aggregate attention maps with optional bounding box masking
             if bounding_boxes:
                 attention_maps = self._aggregate_attention_with_boxes(
-                    self._aggregate_attention(["up", "mid", "down"]),
+                    self._aggregate_attention(),
                     bounding_boxes,
                     img_size=(16, 16),
                 )
             else:
-                attention_maps = self._aggregate_attention(["up", "mid", "down"])
+                attention_maps = self._aggregate_attention()
 
 
             loss = self._compute_contrastive_loss( # previously defined
