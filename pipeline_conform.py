@@ -58,99 +58,126 @@ EXAMPLE_DOC_STRING = """
         ```
 """
 
-
+# handle attention maps
 class AttentionStore:
+    # intiialize storage disct with empty list for keys corresponding
+    # to different stages of network
     @staticmethod
     def get_empty_store():
+        # down: downsampling
+        # mid: middle layers
+        # up: upsampling layers
         return {"down": [], "mid": [], "up": []}
 
+    # stores and processes attention maps under cond
     def __call__(self, attn, is_cross: bool, place_in_unet: str):
+        # current layer active and cross attention
         if self.cur_att_layer >= 0 and is_cross:
+            # check whether att tensor size matches exp res
             if attn.shape[1] == np.prod(self.attn_res):
+                # add attn tensor to step_store
                 self.step_store[place_in_unet].append(attn)
 
+        # increments
         self.cur_att_layer += 1
-        if self.cur_att_layer == self.num_att_layers:
-            self.cur_att_layer = 0
-            self.between_steps()
+        if self.cur_att_layer == self.num_att_layers: # all layers processed
+            self.cur_att_layer = 0 # reset layer counter
+            self.between_steps() # finalize layer
 
+    #transfers the contents of step_store to 
+    # the persistent attention_store
+    # and resets step_store to be empty for the next step
     def between_steps(self):
         self.attention_store = self.step_store
         self.step_store = self.get_empty_store()
-
+    # current state returned which contains processed att maps
     def get_average_attention(self):
         average_attention = self.attention_store
         return average_attention
 
+    # combines att maps from specific stages into single tensor
     def aggregate_attention(self, from_where: List[str]) -> torch.Tensor:
         """Aggregates the attention across the different layers and heads at the specified resolution."""
+        # from_where: list of stages to agg att
+        
         out = []
         attention_maps = self.get_average_attention()
-        for location in from_where:
-            for item in attention_maps[location]:
+        for location in from_where: # loop through specified stages
+            for item in attention_maps[location]: # retrieve their att maps
                 cross_maps = item.reshape(
                     -1, self.attn_res[0], self.attn_res[1], item.shape[-1]
-                )
-                out.append(cross_maps)
+                ) # reshape att map to include spatial resolution
+                out.append(cross_maps) # concatenate all att maps along first dim
         out = torch.cat(out, dim=0)
-        out = out.sum(0) / out.shape[0]
-        return out
+        out = out.sum(0) / out.shape[0] # average att maps
+        return out # single tensor repr aggregated att maps
 
+    # reset all counters to initial states
     def reset(self):
         self.cur_att_layer = 0
         self.step_store = self.get_empty_store()
         self.attention_store = {}
-
+    # initialize attributes
     def __init__(self, attn_res):
         """
         Initialize an empty AttentionStore :param step_index: used to visualize only a specific step in the diffusion
         process
         """
-        self.num_att_layers = -1
-        self.cur_att_layer = 0
-        self.step_store = self.get_empty_store()
-        self.attention_store = {}
-        self.curr_step_index = 0
-        self.attn_res = attn_res
+        self.num_att_layers = -1 # number of attention layers
+        self.cur_att_layer = 0 # counter to track which layer is being processed
+        self.step_store = self.get_empty_store() # temp storage of att maps
+        self.attention_store = {} # persistent storage of att maps
+        self.curr_step_index = 0 # track step index
+        self.attn_res = attn_res # resolution, spatial dims
 
-
+# role: process att mechanisms, integrate with AttentionStore
+# for storing att maps
+# Purpose: q-k-v computations for att
 class AttentionProcessor:
     def __init__(self, attnstore, place_in_unet):
         super().__init__()
-        self.attnstore = attnstore
-        self.place_in_unet = place_in_unet
+        self.attnstore = attnstore # instance of AttentionStore
+        self.place_in_unet = place_in_unet # str to specify stage of UNet (down, mid, up)
 
     def __call__(
         self,
-        attn: Attention,
-        hidden_states,
-        encoder_hidden_states=None,
-        attention_mask=None,
+        attn: Attention, # provides methods for q,k, v, scoring
+        hidden_states, # input tensor to be processed by att mech
+        encoder_hidden_states=None, # optional tensor for cross-att
+        attention_mask=None, # optional tensor to mask att scores
     ):
+        # prepare att mask by preprocessing
         batch_size, sequence_length, _ = hidden_states.shape
         attention_mask = attn.prepare_attention_mask(
             attention_mask, sequence_length, batch_size
         )
-
+        # project hidden states into query space
         query = attn.to_q(hidden_states)
 
-        is_cross = encoder_hidden_states is not None
+        is_cross = encoder_hidden_states is not None # check if cross att
         encoder_hidden_states = (
             encoder_hidden_states
-            if encoder_hidden_states is not None
+            if encoder_hidden_states is not None # if cross att
             else hidden_states
         )
+        # project hidden states into key, value spaces
         key = attn.to_k(encoder_hidden_states)
         value = attn.to_v(encoder_hidden_states)
 
+        # convert shape of tensors
         query = attn.head_to_batch_dim(query)
         key = attn.head_to_batch_dim(key)
         value = attn.head_to_batch_dim(value)
 
+        # compute attention scores
+        # attention_probs: attention map
         attention_probs = attn.get_attention_scores(query, key, attention_mask)
 
+        # pass into AttentionStore for logging
         self.attnstore(attention_probs, is_cross, self.place_in_unet)
 
+        # apply att maps to value tensor with batch-wise mtx mult
+        # integrate att info into hidden states
         hidden_states = torch.bmm(attention_probs, value)
         hidden_states = attn.batch_to_head_dim(hidden_states)
 
@@ -159,6 +186,7 @@ class AttentionProcessor:
         # dropout
         hidden_states = attn.to_out[1](hidden_states)
 
+        # updated hidden states after applying att, proj
         return hidden_states
 
 
@@ -189,23 +217,23 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             A `CLIPImageProcessor` to extract features from generated images; used as inputs to the `safety_checker`.
     """
 
-    model_cpu_offload_seq = "text_encoder->unet->vae"
+    model_cpu_offload_seq = "text_encoder->unet->vae" # define order of pipeline
     _optional_components = ["safety_checker", "feature_extractor"]
-    _exclude_from_cpu_offload = ["safety_checker"]
+    _exclude_from_cpu_offload = ["safety_checker"] # not in cpu offloading
 
     def __init__(
         self,
-        vae: AutoencoderKL,
-        text_encoder: CLIPTextModel,
-        tokenizer: CLIPTokenizer,
-        unet: UNet2DConditionModel,
-        scheduler: KarrasDiffusionSchedulers,
-        safety_checker: StableDiffusionSafetyChecker,
-        feature_extractor: CLIPImageProcessor,
+        vae: AutoencoderKL, # encode im into latent repr, decode them back into im
+        text_encoder: CLIPTextModel, # encode text prompts into latent rep
+        tokenizer: CLIPTokenizer, # tokenizes text input to be compatible with text encode
+        unet: UNet2DConditionModel, # core denoising model
+        scheduler: KarrasDiffusionSchedulers, # manages denoising schedule
+        safety_checker: StableDiffusionSafetyChecker, # optional: identify, filter harmful images
+        feature_extractor: CLIPImageProcessor, # extract im features for safety checker
         requires_safety_checker: bool = True,
     ):
         super().__init__()
-
+        # warning if safety checker is disabled
         if safety_checker is None and requires_safety_checker:
             logger.warning(
                 f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
@@ -215,13 +243,13 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
                 " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
             )
-
+        
         if safety_checker is not None and feature_extractor is None:
             raise ValueError(
                 "Make sure to define a feature extractor when loading {self.__class__} if you want to use the safety"
                 " checker. If you do not want to use the safety checker, you can pass `'safety_checker=None'` instead."
             )
-
+        # register pipeline components
         self.register_modules(
             vae=vae,
             text_encoder=text_encoder,
@@ -231,7 +259,9 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             safety_checker=safety_checker,
             feature_extractor=feature_extractor,
         )
+        # det scale factor of VAE based on architecture
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
+        # handle image transformations
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
         self.register_to_config(requires_safety_checker=requires_safety_checker)
 
@@ -241,7 +271,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         Enable sliced VAE decoding. When this option is enabled, the VAE will split the input tensor in slices to
         compute decoding in several steps. This is useful to save some memory and allow larger batch sizes.
         """
-        self.vae.enable_slicing()
+        self.vae.enable_slicing() # process input tensor in smaller chunks
 
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.disable_vae_slicing
     def disable_vae_slicing(self):
@@ -283,16 +313,16 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         return prompt_embeds
 
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.encode_prompt
-    def encode_prompt(
+    def encode_prompt( # convert text prompts into latent embeddings
         self,
         prompt,
         device,
         num_images_per_prompt,
-        do_classifier_free_guidance,
-        negative_prompt=None,
-        prompt_embeds: Optional[torch.FloatTensor] = None,
-        negative_prompt_embeds: Optional[torch.FloatTensor] = None,
-        lora_scale: Optional[float] = None,
+        do_classifier_free_guidance, # whether to use CFG
+        negative_prompt=None, # guide what im should not contain
+        prompt_embeds: Optional[torch.FloatTensor] = None, # pass precomputed embed
+        negative_prompt_embeds: Optional[torch.FloatTensor] = None, # precomputed embed
+        lora_scale: Optional[float] = None, # dynamically adjust LoRA scaling to text encoder
     ):
         r"""
         Encodes the prompt into text encoder hidden states.
@@ -328,14 +358,15 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             # dynamically adjust the LoRA scale
             adjust_lora_scale_text_encoder(self.text_encoder, lora_scale)
 
-        if prompt is not None and isinstance(prompt, str):
+        if prompt is not None and isinstance(prompt, str): # single prompt
             batch_size = 1
-        elif prompt is not None and isinstance(prompt, list):
+        elif prompt is not None and isinstance(prompt, list): # mult prompts
             batch_size = len(prompt)
         else:
             batch_size = prompt_embeds.shape[0]
 
-        if prompt_embeds is None:
+        # tokenize and encode prompt
+        if prompt_embeds is None: # not precomputed
             # textual inversion: procecss multi-vector tokens if necessary
             if isinstance(self, TextualInversionLoaderMixin):
                 prompt = self.maybe_convert_prompt(prompt, self.tokenizer)
@@ -351,7 +382,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             untruncated_ids = self.tokenizer(
                 prompt, padding="longest", return_tensors="pt"
             ).input_ids
-
+            # do truncuation
             if untruncated_ids.shape[-1] >= text_input_ids.shape[
                 -1
             ] and not torch.equal(text_input_ids, untruncated_ids):
@@ -363,20 +394,17 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     f" {self.tokenizer.model_max_length} tokens: {removed_text}"
                 )
 
-            if (
-                hasattr(self.text_encoder.config, "use_attention_mask")
-                and self.text_encoder.config.use_attention_mask
-            ):
-                attention_mask = text_inputs.attention_mask.to(device)
+            if (hasattr(self.text_encoder.config, "use_attention_mask") and self.text_encoder.config.use_attention_mask):
+                attention_mask = text_inputs.attention_mask.to(device) # masking attr
             else:
                 attention_mask = None
-
+            # pass tokenized prompt through text encoder to obtain latent embed
             prompt_embeds = self.text_encoder(
                 text_input_ids.to(device),
                 attention_mask=attention_mask,
             )
             prompt_embeds = prompt_embeds[0]
-
+        # adjust embedding precision dtype to match of ext encoder or unet
         if self.text_encoder is not None:
             prompt_embeds_dtype = self.text_encoder.dtype
         elif self.unet is not None:
@@ -384,7 +412,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         else:
             prompt_embeds_dtype = prompt_embeds.dtype
 
-        prompt_embeds = prompt_embeds.to(dtype=prompt_embeds_dtype, device=device)
+        prompt_embeds = prompt_embeds.to(dtype=prompt_embeds_dtype, device=device) # precision dtype set
 
         bs_embed, seq_len, _ = prompt_embeds.shape
         # duplicate text embeddings for each generation per prompt, using mps friendly method
@@ -392,13 +420,13 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         prompt_embeds = prompt_embeds.view(
             bs_embed * num_images_per_prompt, seq_len, -1
         )
-
+        # handle cfg
         # get unconditional embeddings for classifier free guidance
         if do_classifier_free_guidance and negative_prompt_embeds is None:
             uncond_tokens: List[str]
             if negative_prompt is None:
                 uncond_tokens = [""] * batch_size
-            elif prompt is not None and type(prompt) is not type(negative_prompt):
+            elif prompt is not None and type(prompt) is not type(negative_prompt): # check same dtype
                 raise TypeError(
                     f"`negative_prompt` should be the same type to `prompt`, but got {type(negative_prompt)} !="
                     f" {type(prompt)}."
@@ -419,6 +447,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 uncond_tokens = self.maybe_convert_prompt(uncond_tokens, self.tokenizer)
 
             max_length = prompt_embeds.shape[1]
+            # tokenize negative prompt into latent embed
             uncond_input = self.tokenizer(
                 uncond_tokens,
                 padding="max_length",
@@ -434,15 +463,15 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 attention_mask = uncond_input.attention_mask.to(device)
             else:
                 attention_mask = None
-
+            # encode negative prompt
             negative_prompt_embeds = self.text_encoder(
                 uncond_input.input_ids.to(device),
                 attention_mask=attention_mask,
             )
             negative_prompt_embeds = negative_prompt_embeds[0]
 
-        if do_classifier_free_guidance:
-            # duplicate unconditional embeddings for each generation per prompt, using mps friendly method
+        if do_classifier_free_guidance: # if cfg
+            # duplicate unconditional embeddings for each generation (duplicated) per prompt, using mps friendly method
             seq_len = negative_prompt_embeds.shape[1]
 
             negative_prompt_embeds = negative_prompt_embeds.to(
@@ -455,38 +484,41 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             negative_prompt_embeds = negative_prompt_embeds.view(
                 batch_size * num_images_per_prompt, seq_len, -1
             )
-
+        # return: encoded latent repr of positive prompt, of negative prompt
         return prompt_embeds, negative_prompt_embeds
 
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.run_safety_checker
-    def run_safety_checker(self, image, device, dtype):
+    def run_safety_checker(self, image, device, dtype): # check if images comply with safety guidelines
         if self.safety_checker is None:
             has_nsfw_concept = None
         else:
+            # convert tensor to PIL
             if torch.is_tensor(image):
                 feature_extractor_input = self.image_processor.postprocess(
                     image, output_type="pil"
-                )
+                ) 
             else:
                 feature_extractor_input = self.image_processor.numpy_to_pil(image)
+            # convert PIL image to tensor repr
             safety_checker_input = self.feature_extractor(
                 feature_extractor_input, return_tensors="pt"
             ).to(device)
             image, has_nsfw_concept = self.safety_checker(
                 images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
             )
+        # returns if image has unsafe content (a flag)
         return image, has_nsfw_concept
 
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.decode_latents
-    def decode_latents(self, latents):
+    def decode_latents(self, latents): # decodes latent repr from vae to actual images 
         deprecation_message = "The decode_latents method is deprecated and will be removed in 1.0.0. Please use VaeImageProcessor.postprocess(...) instead"
         deprecate("decode_latents", "1.0.0", deprecation_message, standard_warn=False)
 
-        latents = 1 / self.vae.config.scaling_factor * latents
+        latents = 1 / self.vae.config.scaling_factor * latents # scale latents to corrrect range
         image = self.vae.decode(latents, return_dict=False)[0]
-        image = (image / 2 + 0.5).clamp(0, 1)
+        image = (image / 2 + 0.5).clamp(0, 1) # normalize image range
         # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
-        image = image.cpu().permute(0, 2, 3, 1).float().numpy()
+        image = image.cpu().permute(0, 2, 3, 1).float().numpy() # reaarange dim with permute
         return image
 
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.prepare_extra_step_kwargs
@@ -496,19 +528,20 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
+        # check for eta param
         accepts_eta = "eta" in set(
             inspect.signature(self.scheduler.step).parameters.keys()
         )
         extra_step_kwargs = {}
         if accepts_eta:
-            extra_step_kwargs["eta"] = eta
+            extra_step_kwargs["eta"] = eta # add eta if exists
 
         # check if the scheduler accepts generator
         accepts_generator = "generator" in set(
             inspect.signature(self.scheduler.step).parameters.keys()
         )
         if accepts_generator:
-            extra_step_kwargs["generator"] = generator
+            extra_step_kwargs["generator"] = generator # same for generator param
         return extra_step_kwargs
 
     def check_inputs(
@@ -602,18 +635,18 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             )
 
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.prepare_latents
-    def prepare_latents(
+    def prepare_latents( # set up latent tensors used in diffusion process
         self,
-        batch_size,
+        batch_size, # number of latents to prepare
         num_channels_latents,
-        height,
+        height, # dim of output image
         width,
         dtype,
         device,
-        generator,
+        generator, # random number generator for reproducibility of noise
         latents=None,
     ):
-        shape = (
+        shape = ( # shape of latent
             batch_size,
             num_channels_latents,
             height // self.vae_scale_factor,
@@ -625,30 +658,30 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators."
             )
 
-        if latents is None:
+        if latents is None: # no latents provided
             latents = randn_tensor(
                 shape, generator=generator, device=device, dtype=dtype
-            )
+            ) # tensor of random noise
         else:
             latents = latents.to(device)
 
         # scale the initial noise by the standard deviation required by the scheduler
         latents = latents * self.scheduler.init_noise_sigma
-        return latents
+        return latents # tensor
 
-    def _aggregate_attention(self):
+    def _aggregate_attention(self): # combine attention maps from different parts of model
         """Aggregates the attention for each token and computes the max activation value for each token to alter."""
         attention_maps = self.attention_store.aggregate_attention(
             from_where=("up", "down", "mid"),
         )
 
-        return attention_maps
+        return attention_maps # consolidated attention mapss
 
     @staticmethod
-    def _compute_contrastive_loss(
+    def _compute_contrastive_loss( # compute loss based on att maps of model
         attention_maps: torch.Tensor,
-        attention_maps_t_plus_one: Optional[torch.Tensor],
-        token_groups: List[List[int]],
+        attention_maps_t_plus_one: Optional[torch.Tensor], # for next step
+        token_groups: List[List[int]], # groups of token indices belonging to same class
         loss_type: str,
         temperature: float = 0.07,
         do_smoothing: bool = True,
@@ -659,12 +692,13 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
     ) -> torch.Tensor:
         """Computes the attend-and-contrast loss using the maximum attention value for each token."""
 
-        attention_for_text = attention_maps[:, :, 1:-1]
+        attention_for_text = attention_maps[:, :, 1:-1] # remove special tokens such as CLS, SEP
 
-        if softmax_normalize:
+        if softmax_normalize: # softmax normalize
             attention_for_text *= 100
             attention_for_text = torch.nn.functional.softmax(attention_for_text, dim=-1)
 
+        # same step for t+1, also do optional softmax normalization
         attention_for_text_t_plus_one = None
         if attention_maps_t_plus_one is not None:
             attention_for_text_t_plus_one = attention_maps_t_plus_one[:, :, 1:-1]
@@ -674,32 +708,33 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     attention_for_text_t_plus_one, dim=-1
                 )
 
-        indices_to_clases = {}
+        indices_to_clases = {} # map indices to their class labels
         for c, group in enumerate(token_groups):
             for obj in group:
                 indices_to_clases[obj] = c
 
         classes = []
         embeddings = []
-        for ind, c in indices_to_clases.items():
+        for ind, c in indices_to_clases.items(): # for each token in token_groups
             classes.append(c)
             # Shift indices since we removed the first token
-            embedding = attention_for_text[:, :, ind - 1]
-            if do_smoothing:
+            embedding = attention_for_text[:, :, ind - 1] # extract each one's embedding
+            if do_smoothing: # optional gaussian smoothing
                 smoothing = GaussianSmoothing(
                     kernel_size=smoothing_kernel_size, sigma=smoothing_sigma
                 ).to(attention_for_text.device)
                 input = F.pad(
                     embedding.unsqueeze(0).unsqueeze(0), (1, 1, 1, 1), mode="reflect"
                 )
-                embedding = smoothing(input).squeeze(0).squeeze(0)
+                embedding = smoothing(input).squeeze(0).squeeze(0) # smoothed embedding
             embedding = embedding.view(-1)
 
             if softmax_normalize_attention_maps:
                 embedding *= 100
                 embedding = torch.nn.functional.softmax(embedding)
-            embeddings.append(embedding)
+            embeddings.append(embedding) # add the embeddings to list
 
+            # repeat smame process if attention t+1 is defined
             if attention_for_text_t_plus_one is not None:
                 classes.append(c)
                 # Shift indices since we removed the first token
@@ -720,15 +755,16 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     embedding *= 100
                     embedding = torch.nn.functional.softmax(embedding)
                 embeddings.append(embedding)
-
+        # compile processed embeddings to their class labels
         classes = torch.tensor(classes).to(attention_for_text.device)
         embeddings = torch.stack(embeddings, dim=0).to(attention_for_text.device)
 
         # loss_fn = losses.NTXentLoss(temperature=temperature)
 
+        # select loss function
         if loss_type == "ntxent_contrastive":
             if len(token_groups) > 0 and len(token_groups[0]) > 1:
-                loss_fn = losses.NTXentLoss(temperature=temperature)
+                loss_fn = losses.NTXentLoss(temperature=temperature) # losses imported from pytorch
             else:
                 loss_fn = losses.ContrastiveLoss(
                     distance=distances.CosineSimilarity(), pos_margin=1, neg_margin=0
@@ -742,9 +778,9 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         else:
             raise ValueError(f"loss_fn {loss_type} not supported")
 
-        loss = loss_fn(embeddings, classes)
+        loss = loss_fn(embeddings, classes) # loss computed using loss func and embeddings and classes
 
-        return loss
+        return loss # scalar tensor
 
     @staticmethod
     def _update_latent(
@@ -753,18 +789,19 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         """Update the latent according to the computed loss."""
         grad_cond = torch.autograd.grad(
             loss.requires_grad_(True), [latents], retain_graph=True
-        )[0]
-        latents = latents - step_size * grad_cond
+        )[0] # compute grad
+        latents = latents - step_size * grad_cond # GD step
         return latents
 
+    # iterative opt process to refine latent repr acc to specified loss func
     def _perform_iterative_refinement_step(
         self,
         latents: torch.Tensor,
-        token_groups: List[List[int]],
+        token_groups: List[List[int]], # groups of tokens to compute and align attention for
         loss: torch.Tensor,
         text_embeddings: torch.Tensor,
         step_size: float,
-        t: int,
+        t: int, # timestep in diffusion process
         refinement_steps: int = 20,
         do_smoothing: bool = True,
         smoothing_kernel_size: int = 3,
@@ -782,14 +819,14 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         for iteration in range(refinement_steps):
             iteration += 1
 
-            latents = latents.clone().detach().requires_grad_(True)
-            self.unet(latents, t, encoder_hidden_states=text_embeddings).sample
+            latents = latents.clone().detach().requires_grad_(True) # use to reset grad for each iteration
+            self.unet(latents, t, encoder_hidden_states=text_embeddings).sample # pass latents through unet
             self.unet.zero_grad()
 
             # Get max activation value for each subject token
-            attention_maps = self._aggregate_attention()
+            attention_maps = self._aggregate_attention() # current att maps
 
-            loss = self._compute_contrastive_loss(
+            loss = self._compute_contrastive_loss( # previously defined
                 attention_maps=attention_maps,
                 attention_maps_t_plus_one=attention_maps_t_plus_one,
                 token_groups=token_groups,
@@ -803,7 +840,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             )
 
             if loss != 0:
-                latents = self._update_latent(latents, loss, step_size)
+                latents = self._update_latent(latents, loss, step_size) # gradient step
 
         # Run one more time but don't compute gradients and update the latents.
         # We just need to compute the new loss - the grad update will occur below
@@ -826,13 +863,13 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             softmax_normalize=softmax_normalize,
             softmax_normalize_attention_maps=softmax_normalize_attention_maps,
         )
-        return loss, latents
+        return loss, latents # final loss, refined latents
 
-    def register_attention_control(self):
+    def register_attention_control(self): # att control into UNet by assigning custom AttentionProcessır objects to each att layer within the model
         attn_procs = {}
         cross_att_count = 0
-        for name in self.unet.attn_processors.keys():
-            if name.startswith("mid_block"):
+        for name in self.unet.attn_processors.keys(): # iterate over attention layers
+            if name.startswith("mid_block"): # assign position to att layer
                 place_in_unet = "mid"
             elif name.startswith("up_blocks"):
                 place_in_unet = "up"
@@ -846,8 +883,8 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 attnstore=self.attention_store, place_in_unet=place_in_unet
             )
 
-        self.unet.set_attn_processor(attn_procs)
-        self.attention_store.num_att_layers = cross_att_count
+        self.unet.set_attn_processor(attn_procs) # update UNet's attention processors
+        self.attention_store.num_att_layers = cross_att_count # update layer count
 
     @torch.no_grad()
     @replace_example_docstring(EXAMPLE_DOC_STRING)
@@ -855,6 +892,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         self,
         prompt: str,
         token_groups: List[List[int]],
+        bounding_boxes: Optional[Dict[int, List[float]]] = None,  # bounding_boxes
         height: Optional[int] = None,
         width: Optional[int] = None,
         num_inference_steps: int = 50,
@@ -907,7 +945,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 "not-safe-for-work" (nsfw) content.
         """
 
-        # 0. Default height and width to unet
+        # 0. Default height and width to unet (if not specified)
         height = height or self.unet.config.sample_size * self.vae_scale_factor
         width = width or self.unet.config.sample_size * self.vae_scale_factor
 
@@ -923,7 +961,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             negative_prompt_embeds,
         )
 
-        # 2. Define call parameters
+        # 2. Define call parameters,, determine batch size based on type of prompt
         if prompt is not None and isinstance(prompt, str):
             batch_size = 1
         elif prompt is not None and isinstance(prompt, list):
@@ -935,9 +973,9 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
         # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
-        do_classifier_free_guidance = guidance_scale > 1.0
+        do_classifier_free_guidance = guidance_scale > 1.0 # boolean
 
-        # 3. Encode input prompt
+        # 3. Encode input prompt into embeddings
         prompt_embeds, negative_prompt_embeds = self.encode_prompt(
             prompt,
             device,
@@ -953,7 +991,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         if do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
 
-        # 4. Prepare timesteps
+        # 4. Prepare timesteps for diffusion process
         self.scheduler.set_timesteps(num_inference_steps, device=device)
         timesteps = self.scheduler.timesteps
 
@@ -975,12 +1013,12 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
         if attn_res is None:
             attn_res = int(np.ceil(width / 32)), int(np.ceil(height / 32))
-        self.attention_store = AttentionStore(attn_res)
-        self.register_attention_control()
+        self.attention_store = AttentionStore(attn_res) # att tracking
+        self.register_attention_control() # control mechanism
 
         # default config for step size from original repo
         scale_range = np.linspace(1.0, 0.5, len(self.scheduler.timesteps))
-        step_size = scale_factor * np.sqrt(scale_range)
+        step_size = scale_factor * np.sqrt(scale_range) # step size scaling
 
         text_embeddings = (
             prompt_embeds[batch_size * num_images_per_prompt :]
@@ -999,22 +1037,22 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             for i, t in enumerate(timesteps):
                 # Attend and contrast process
                 with torch.enable_grad():
-                    latents = latents.clone().detach().requires_grad_(True)
+                    latents = latents.clone().detach().requires_grad_(True) # new tensor create
                     updated_latents = []
                     for j, (latent, token_group, text_embedding) in enumerate(
                         zip(latents, token_groups, text_embeddings)
-                    ):
+                    ): # for each latent in batch
                         # Forward pass of denoising with text conditioning
                         latent = latent.unsqueeze(0)
                         text_embedding = text_embedding.unsqueeze(0)
-
+                        # latent passed through unet to produce denoised sample
                         self.unet(
                             latent,
                             t,
                             encoder_hidden_states=text_embedding,
                             cross_attention_kwargs=cross_attention_kwargs,
                         ).sample
-                        self.unet.zero_grad()
+                        self.unet.zero_grad() # reset grad of unet
 
                         # Get max activation value for each subject token
                         attn_map = self._aggregate_attention()
@@ -1038,7 +1076,8 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                         )
 
                         # If this is an iterative refinement step, verify we have reached the desired threshold for all
-                        if i in iterative_refinement_steps:
+                        # optional step, additional refinement applied to latents
+                        if i in iterative_refinement_steps: # done in step 0, 10, 20 currently
                             loss, latent = self._perform_iterative_refinement_step(
                                 latents=latent,
                                 token_groups=token_group,
@@ -1059,7 +1098,8 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
                         # Perform gradient update
                         if i < max_iter_to_alter:
-                            if loss != 0:
+                            if loss != 0: 
+                                # GD like update to minimize loss
                                 latent = self._update_latent(
                                     latents=latent,
                                     loss=loss,
@@ -1069,7 +1109,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                         updated_latents.append(latent)
 
                     latents = torch.cat(updated_latents, dim=0)
-
+                # handle att maps for next step
                 if add_previous_attention_maps and (
                     previous_attention_map_anchor_step is None
                     or i == previous_attention_map_anchor_step
@@ -1079,12 +1119,12 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = (
                     torch.cat([latents] * 2) if do_classifier_free_guidance else latents
-                )
+                ) # form concatenated input
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t
                 )
 
-                # predict the noise residual
+                # predict the noise residual by unet
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
@@ -1092,7 +1132,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
                     cross_attention_kwargs=cross_attention_kwargs,
                 ).sample
 
-                # perform guidance
+                # perform guidance if CFG enabled
                 if do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + guidance_scale * (
@@ -1114,9 +1154,10 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
 
         # 8. Post-processing
         if not output_type == "latent":
-            image = self.vae.decode(
+            # convert refined latents into images using VAE decoder
+            image = self.vae.decode( 
                 latents / self.vae.config.scaling_factor, return_dict=False
-            )[0]
+            )[0] 
             # image, has_nsfw_concept = self.run_safety_checker(image, device, prompt_embeds.dtype)
             has_nsfw_concept = None
         else:
@@ -1127,7 +1168,7 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
             do_denormalize = [True] * image.shape[0]
         else:
             do_denormalize = [not has_nsfw for has_nsfw in has_nsfw_concept]
-
+        # process images for desired output type
         image = self.image_processor.postprocess(
             image, output_type=output_type, do_denormalize=do_denormalize
         )
@@ -1154,12 +1195,12 @@ class GaussianSmoothing(torch.nn.Module):
     def __init__(
         self,
         channels: int = 1,
-        kernel_size: int = 3,
+        kernel_size: int = 3, # larger kernel - more smoothing
         sigma: float = 0.5,
-        dim: int = 2,
+        dim: int = 2, # 2d for image
     ):
         super().__init__()
-
+        # match kernel, sigma dimensions
         if isinstance(kernel_size, int):
             kernel_size = [kernel_size] * dim
         if isinstance(sigma, float):
@@ -1173,11 +1214,7 @@ class GaussianSmoothing(torch.nn.Module):
         )
         for size, std, mgrid in zip(kernel_size, sigma, meshgrids):
             mean = (size - 1) / 2
-            kernel *= (
-                1
-                / (std * math.sqrt(2 * math.pi))
-                * torch.exp(-(((mgrid - mean) / (2 * std)) ** 2))
-            )
+            kernel *= (1 / (std * math.sqrt(2 * math.pi)) * torch.exp(-(((mgrid - mean) / (2 * std)) ** 2)))
 
         # Make sure sum of values in gaussian kernel equals 1.
         kernel = kernel / torch.sum(kernel)
@@ -1186,7 +1223,7 @@ class GaussianSmoothing(torch.nn.Module):
         kernel = kernel.view(1, 1, *kernel.size())
         kernel = kernel.repeat(channels, *[1] * (kernel.dim() - 1))
 
-        self.register_buffer("weight", kernel)
+        self.register_buffer("weight", kernel) # save kernel as buffer
         self.groups = channels
 
         if dim == 1:
