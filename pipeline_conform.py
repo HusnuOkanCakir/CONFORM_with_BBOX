@@ -682,12 +682,12 @@ class ConformPipeline(DiffusionPipeline, TextualInversionLoaderMixin):
         Apply bounding box masks to the attention maps.
         """
         masked_maps = attention_maps.clone()
-        for token_idx, bbox in bounding_boxes.items():
+        for token_idx, bbox in bounding_boxes.items(): # token index might be wrong
             x_min, y_min, x_max, y_max = [
                 int(coord * size) for coord, size in zip(bbox, img_size*2)
             ]
-            mask = torch.zeros_like(masked_maps[:, :, token_idx])
-            mask[y_min:y_max, x_min:x_max] = 1
+            mask = torch.zeros_like(masked_maps[:, :, token_idx]) # ones_like
+            mask[y_min:y_max, x_min:x_max] = 1 # 2
             masked_maps[:, :, token_idx] *= mask  # Apply the mask
         return masked_maps
 
