@@ -6,7 +6,7 @@
 
 ><p align="center">
 
->[Tuna Han Salih Meral](https://tunahansalih.github.io/), [Enis Simsar](https://enis.dev/), [Federico Tombari](https://federicotombari.github.io/), [Pinar Yanardag](https://pinguar.org/)
+>[Okan Çakır], [Özgür Temmuz Çelik], [Mahan Ahmadvand], [Kerem Güra]
 
 ></p>
 >
@@ -23,7 +23,7 @@ accuracy in generated images of CONFORM. Preliminary results demonstrate that ou
 <p align="center">
     <img src="./README.assets/teaser.png" width="800px"/>  
     <br>
-    Our training-free method combines a contrastive objective with test-time optimization, significantly improving how models such as Imagen and Stable Diffusion generate images with text prompts consisting of multiple concepts or subjects such as "a bear and a horse" 
+    Our approach combines the strengths of the Layout Predictor and CONFORM. We generate the bounding boxes for each object in the prompt using the Layout Predictor for accurate spatial arrangements. Afterwards, we use these bounding boxes to accurately place objects within the frame. This novel solution allows us to solve the misplacement issue of objects in the original model of CONFORM.
 </p>
 
 ## Description
