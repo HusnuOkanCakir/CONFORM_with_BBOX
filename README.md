@@ -6,7 +6,7 @@
 
 ><p align="center">
 
->[Okan Çakır], [Özgür Temmuz Çelik], [Mahan Ahmadvand], [Kerem Güra]
+>Okan Çakır, Özgür Temmuz Çelik, Mahan Ahmadvand, Kerem Güra
 
 ></p>
 >
@@ -32,7 +32,7 @@ Official implementation for our paper, CONFORM.
 <p align="center">
     <img src="./README.assets/conform-framework.png" width="800px"/>  
 <br>
-An overview of CONFORM. Given a prompt (e.g., ‘A green glasses and a yellow clock’), we extract the subject tokens green, glasses, yellow, and clock and their corresponding attention maps (A<sup>green</sup>,A<sup>glasses</sup>, A<sup>yellow</sup>, A<sup>clock</sup>) from timesteps <i>t</i> and <i>t + 1</i>. We employ our contrastive objective at each time step to repel negative pairs and attract positive pairs.
+Overview: Given a prompt, we extract the bounding box coordinates for each object in the prompt, which take into account their relative positions in the frame. Using these bounding boxes, the original attention aggregation in CONFORM is adjusted to apply a mask to the pixel region corresponding to the bounding box. As a result, the object placement is improved compared to the original model. The other aspects of CONFORM such as the contrastive loss and attention processing remain the same.
 </p>
 
 ## Setup
