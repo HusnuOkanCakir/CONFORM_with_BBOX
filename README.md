@@ -1,4 +1,4 @@
-# **CONFORM: Contrast is All You Need For High-Fidelity Text-to-Image Diffusion Models [CVPR 2024]**
+# **Improving Spatial Arrangement in CONFORM using Bounding Boxes**
 
 [![Project Website](https://img.shields.io/badge/Project-Website-green)](https://conform-diffusion.github.io) [![arXiv](https://img.shields.io/badge/arXiv-2312.06059-b31b1b.svg)](https://arxiv.org/abs/2312.06059)
 
@@ -10,7 +10,13 @@
 
 ></p>
 >
-> Images produced by text-to-image diffusion models might not always faithfully represent the semantic intent of the provided text prompt where the model might overlook or entirely fail to produce certain objects. While recent studies propose various solutions, they often require customly tailored functions for each of these problems, leading to sub-optimal results, especially for complex prompts. Our work introduces a novel perspective by tackling this challenge in a contrastive context. Our approach intuitively promotes the segregation of objects in attention maps, while also maintaining that pairs of related attributes are kept close to each other. We conducted extensive experiments across a wide variety of scenarios, each involving unique combinations of objects, attributes, and scenes. These experiments effectively showcase the versatility, efficiency, and flexibility of our method in working with both latent and pixel-based diffusion models, including Stable Diffusion and Imagen. Moreover, we publicly share our source code to facilitate further research. 
+> Text-to-image generation is an emerging topic in
+Machine Learning and Natural Language Processing. One critical aspect of evaluating generated
+images is the correct placement of objects according to the given prompt. This paper investigates
+two models: Layout Predictor
+and CONFORM (Meral et al., 2023). By combining the strengths of these models, we propose a
+novel approach that improves object placement
+accuracy in generated images of CONFORM. Preliminary results demonstrate that our model significantly improves alignment between textual descriptions and visual outputs.
 
 
 
