@@ -4,7 +4,7 @@
 
 ><p align="center">
 
->Okan Çakır, Özgür Temmuz Çelik, Mahan Ahmadvand, Kerem Güra
+>Contributors: Okan Çakır, Özgür Temmuz Çelik, Mahan Ahmadvand, Kerem Güra
 
 ></p>
 >
@@ -38,3 +38,6 @@ The code also relies on Hugging Face's [diffusers](https://github.com/huggingfac
 
 ## Usage
 The Jupyter notebook: notebook.ipynb can be used to generate an image from any prompt. The token indices for the objects should be arranged manually.
+
+## Acknowledgments
+We would like to thank Enis Simsar for his assistance and guidance throughout the project.
