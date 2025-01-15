@@ -1,7 +1,5 @@
 # **Improving Spatial Arrangement in CONFORM using Bounding Boxes**
 
-[![Project Website](https://img.shields.io/badge/Project-Website-green)](https://conform-diffusion.github.io) [![arXiv](https://img.shields.io/badge/arXiv-2312.06059-b31b1b.svg)](https://arxiv.org/abs/2312.06059)
-
 
 
 ><p align="center">
@@ -20,19 +18,13 @@ accuracy in generated images of CONFORM. Preliminary results demonstrate that ou
 
 
 
-<p align="center">
-    <img src="./README.assets/teaser.png" width="800px"/>  
-    <br>
-    Our approach combines the strengths of the Layout Predictor and CONFORM. We generate the bounding boxes for each object in the prompt using the Layout Predictor for accurate spatial arrangements. Afterwards, we use these bounding boxes to accurately place objects within the frame. This novel solution allows us to solve the misplacement issue of objects in the original model of CONFORM.
+
+Our approach combines the strengths of the Layout Predictor and CONFORM. We generate the bounding boxes for each object in the prompt using the Layout Predictor for accurate spatial arrangements. Afterwards, we use these bounding boxes to place objects within the frame accurately. This novel solution allows us to solve the misplacement issue of objects in the original model of CONFORM.
 </p>
 
 ## Description
-Official implementation for our paper, CONFORM.
 
-<p align="center">
-    <img src="./README.assets/conform-framework.png" width="800px"/>  
-<br>
-Overview: Given a prompt, we extract the bounding box coordinates for each object in the prompt, which take into account their relative positions in the frame. Using these bounding boxes, the original attention aggregation in CONFORM is adjusted to apply a mask to the pixel region corresponding to the bounding box. As a result, the object placement is improved compared to the original model. The other aspects of CONFORM such as the contrastive loss and attention processing remain the same.
+Overview: Given a prompt, we extract the bounding box coordinates for each object in the prompt, which consider their relative positions in the frame. Using these bounding boxes, the original attention aggregation in CONFORM is adjusted to apply a mask to the pixel region corresponding to the bounding box. As a result, the object placement is improved compared to the original model. The other aspects of CONFORM such as the contrastive loss and attention processing remain the same.
 </p>
 
 ## Setup
@@ -41,7 +33,7 @@ Overview: Given a prompt, we extract the bounding box coordinates for each objec
 The necessary libraries are installed within the notebook.ipynb file. Running it on Google Colab will be sufficient to test out the model.
 
 ### Hugging Face Diffusers Library
-The code relies also on Hugging Face's [diffusers](https://github.com/huggingface/diffusers) library for downloading the Stable Diffusion v1.5 model. 
+The code also relies on Hugging Face's [diffusers](https://github.com/huggingface/diffusers) library for downloading the Stable Diffusion v1.5 model. 
 
 
 ## Usage
