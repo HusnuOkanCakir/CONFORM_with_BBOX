@@ -38,18 +38,3 @@ The code also relies on Hugging Face's [diffusers](https://github.com/huggingfac
 
 ## Usage
 The Jupyter notebook: notebook.ipynb can be used to generate an image from any prompt. The token indices for the objects should be arranged manually.
-
-## Citation
-
-If you find our work useful, please consider citing our paper:
-
-```
-@misc{meral2023conform,
-    title={CONFORM: Contrast is All You Need For High-Fidelity Text-to-Image Diffusion Models},
-    author={Tuna Han Salih Meral and Enis Simsar and Federico Tombari and Pinar Yanardag},
-    year={2023},
-    eprint={2312.06059},
-    archivePrefix={arXiv},
-    primaryClass={cs.CV}
-}
-```
