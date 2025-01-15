@@ -37,7 +37,16 @@ The code also relies on Hugging Face's [diffusers](https://github.com/huggingfac
 
 
 ## Usage
+Please download these 2 folders (that contain the pretrained models) and place them in the same folder with the notebook:
+
+https://drive.google.com/drive/folders/1CpFydL4Z1COWD-HnJ_gmBqNNFNb0Ti3C?usp=sharing
+
+https://drive.google.com/drive/folders/1yWLrGolB3SUd-6v4C_KFqU2ZzUvArbLR?usp=sharing
+
+
 The Jupyter notebook: notebook.ipynb can be used to generate an image from any prompt. The token indices for the objects should be arranged manually.
+
+The Jupyter notebook: notebook_SPRel_caclulation.ipynb can be used to calculate the SPRel prcision for the generated images for evaluation purposes.
 
 ## Acknowledgments
 We would like to thank Enis Simsar for his assistance and guidance throughout the project.
