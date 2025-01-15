@@ -38,25 +38,14 @@ Overview: Given a prompt, we extract the bounding box coordinates for each objec
 ## Setup
 
 ### Environment
-To set up their environment, please run:
-```
-conda env create -f environment.yaml
-conda activate conform
-```
+The necessary libraries are installed within the notebook.ipynb file. Running it on Google Colab will be sufficient to test out the model.
 
 ### Hugging Face Diffusers Library
-Our code relies also on Hugging Face's [diffusers](https://github.com/huggingface/diffusers) library for downloading the Stable Diffusion v1.5 model. 
+The code relies also on Hugging Face's [diffusers](https://github.com/huggingface/diffusers) library for downloading the Stable Diffusion v1.5 model. 
 
 
 ## Usage
-
-<p align="center">
-    <img src="./README.assets/main_comparison_one_page.png" width="800px"/>  
-<br>
-Example generations by Stable Diffusion, CONFORM, Attend & Excite, and Divide & Bind. 
-</p>
-
-To generate an image, you can use the jupyter notebook `notebook.ipynb`.
+The Jupyter notebook: notebook.ipynb can be used to generate an image from any prompt. The token indices for the objects should be arranged manually.
 
 ## Citation
 
